@@ -2,7 +2,7 @@ import re
 from pathlib import Path
 from typing import Optional, Tuple
 
-import fitz
+import pymupdf
 
 from .citations import extract_in_text_citations
 from .metadata import extract_metadata
@@ -14,30 +14,27 @@ from .sections import detect_sections
 
 
 def infer_ids(pdf_path: Path) -> Tuple[str, str]:
-    """
-    Accept common dataset naming patterns and fall back to parent folders.
-    """
-    name = pdf_path.stem
+    """Infer paper/variant IDs from filename, then parent folders."""
+    name = pdf_path.stem.upper()
 
-    paper = re.search(r"\b(P\d{3})\b", name, re.IGNORECASE)
-    variant = re.search(r"\b(V\d{1,2})\b", name, re.IGNORECASE)
+    paper_match = re.search(r"(P\d{3})", name)
+    variant_match = re.search(r"(?:^|_)(V\d{1,2})(?:_|$)", name)
 
-    paper_id = paper.group(1).upper() if paper else ""
-    variant_id = variant.group(1).upper() if variant else ""
+    paper_id = paper_match.group(1) if paper_match else ""
+    variant_id = variant_match.group(1) if variant_match else ""
 
-    if not paper_id:
-        for parent in pdf_path.parents:
-            match = re.search(r"\b(P\d{3})\b", parent.name, re.IGNORECASE)
-            if match:
-                paper_id = match.group(1).upper()
-                break
+    for parent in pdf_path.parents:
+        parent_name = parent.name.upper()
 
-    if not variant_id:
-        for parent in pdf_path.parents:
-            match = re.search(r"\b(V\d{1,2})\b", parent.name, re.IGNORECASE)
-            if match:
-                variant_id = match.group(1).upper()
-                break
+        if not paper_id:
+            paper_match = re.search(r"(P\d{3})", parent_name)
+            if paper_match:
+                paper_id = paper_match.group(1)
+
+        if not variant_id:
+            variant_match = re.search(r"(V\d{1,2})", parent_name)
+            if variant_match:
+                variant_id = variant_match.group(1)
 
     return paper_id or "UNKNOWN", variant_id or "V0"
 
@@ -58,34 +55,31 @@ def extract_document(
     variant_id = variant_id or inferred_variant
 
     pages = []
-    with fitz.open(path) as doc:
+    with pymupdf.open(path) as doc:
         for index, page in enumerate(doc):
-            text = page.get_text("text") or ""
             pages.append(
                 Page(
                     page_number=index + 1,
-                    text=text,
+                    text=page.get_text("text") or "",
                     extraction_method="pymupdf",
                 )
             )
 
         metadata = extract_metadata(doc)
 
-    combined_text = "\n".join(p.text for p in pages)
-    quality = extraction_quality(combined_text)
+    quality = extraction_quality("\n".join(p.text for p in pages))
+    method = "pymupdf"
+    ocr_used = False
 
-    if needs_ocr(combined_text, ocr_threshold):
+    if needs_ocr("\n".join(p.text for p in pages), ocr_threshold):
         try:
             pages = ocr_pdf(str(path))
             method = "ocr"
             ocr_used = True
+            quality = extraction_quality("\n".join(p.text for p in pages))
         except NotImplementedError:
-            # Keep the PyMuPDF output available and expose its quality score.
-            method = "pymupdf"
-            ocr_used = False
-    else:
-        method = "pymupdf"
-        ocr_used = False
+            # OCR is intentionally an integration point in this Phase-1 package.
+            pass
 
     return StructuredDocument(
         paper_id=paper_id,
