@@ -242,7 +242,10 @@ class Claim(Base):
         Text,
         nullable=False,
     )
-
+    claim_type: Mapped[str | None] = mapped_column(
+        String(30),
+        nullable=True,
+    )
     page_number: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,

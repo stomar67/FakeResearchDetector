@@ -27,3 +27,5 @@ temp_*.py
 # OS files
 .DS_Store
 Thumbs.db
+
+*.phase1-before-nlp

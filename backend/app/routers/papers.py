@@ -7,11 +7,12 @@ from sqlalchemy.orm import Session
 from pdf_processor.extractor import extract_document
 
 from ..dependencies import get_db
-from ..models import Citation, Document, Page, Paper, Reference, Section
+from ..models import Citation, Claim, Document, Page, Paper, Reference, Section
 from ..schemas import (
     AnalysisResponse,
     PaperUploadResponse,
 )
+from ..services.nlp_service import run_phase1_nlp
 
 
 router = APIRouter(
@@ -132,20 +133,27 @@ def analyze_paper(
             )
         )
 
+    section_records = {}
+
     for section_order, section in enumerate(
         structured_document.sections,
         start=1,
     ):
-        db.add(
-            Section(
-                paper_id=paper.id,
-                section_name=section.title,
-                section_order=section_order,
-                page_start=section.page_start,
-                page_end=section.page_end,
-                content=section.text,
-            )
+        db_section = Section(
+            paper_id=paper.id,
+            section_name=section.title,
+            section_order=section_order,
+            page_start=section.page_start,
+            page_end=section.page_end,
+            content=section.text,
         )
+
+        db.add(db_section)
+
+        section_records.setdefault(
+            section.title.strip().lower(),
+            [],
+        ).append(db_section)
 
     reference_map = {}
 
@@ -167,6 +175,8 @@ def analyze_paper(
 
     db.flush()
 
+    citation_records = []
+
     for citation in structured_document.in_text_citations:
         reference_id = None
 
@@ -178,20 +188,88 @@ def analyze_paper(
             if reference is not None:
                 reference_id = reference.id
 
-        db.add(
-            Citation(
-                paper_id=paper.id,
-                claim_id=None,
-                reference_id=reference_id,
-                citation_text=citation.citation_text,
-                page_number=citation.page_number,
-            )
+        db_citation = Citation(
+            paper_id=paper.id,
+            claim_id=None,
+            reference_id=reference_id,
+            citation_text=citation.citation_text,
+            page_number=citation.page_number,
         )
+
+        db.add(db_citation)
+        citation_records.append(db_citation)
+
+    db.flush()
+
+    # Run Sneha's existing Phase 1 NLP pipeline.
+    integrated_claims = run_phase1_nlp(
+        structured_document,
+    )
+
+    for integrated_claim in integrated_claims:
+        section_id = None
+
+        matching_sections = section_records.get(
+            integrated_claim["section"].strip().lower(),
+            [],
+        )
+
+        if matching_sections:
+            candidate_page = integrated_claim["page"]
+
+            page_matches = [
+                section
+                for section in matching_sections
+                if (
+                    section.page_start is None
+                    or section.page_end is None
+                    or (
+                        section.page_start
+                        <= candidate_page
+                        <= section.page_end
+                    )
+                )
+            ]
+
+            if len(page_matches) == 1:
+                section_id = page_matches[0].id
+            elif len(matching_sections) == 1:
+                section_id = matching_sections[0].id
+
+        db_claim = Claim(
+            paper_id=paper.id,
+            section_id=section_id,
+            claim_text=integrated_claim["text"],
+            claim_type=integrated_claim["claim_type"],
+            page_number=integrated_claim["page"],
+        )
+
+        db.add(db_claim)
+        db.flush()
+
+        for associated_citation in integrated_claim["citations"]:
+            citation_text = associated_citation["citation_text"].strip()
+
+            matching_citations = [
+                citation
+                for citation in citation_records
+                if citation.citation_text.strip() == citation_text
+                and citation.page_number
+                == associated_citation["page"]
+            ]
+
+            for matching_citation in matching_citations:
+                if matching_citation.claim_id is None:
+                    matching_citation.claim_id = db_claim.id
+                    break
 
     db.commit()
 
     return AnalysisResponse(
         paper_id=paper_id,
         status="completed",
-        message="PDF extraction and Phase 1 database persistence completed successfully.",
+        message=(
+            "PDF extraction, Phase 1 NLP processing, "
+            "and database persistence completed successfully."
+        ),
     )
