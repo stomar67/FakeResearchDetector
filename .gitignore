@@ -3,3 +3,29 @@
 __pycache__/
 *.pyc
 uploads/
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# VS Code
+.vscode/
+
+# Temporary / inspection files
+temp_*.py
+
+# OS files
+.DS_Store
+Thumbs.db
+
+*.phase1-before-nlp
