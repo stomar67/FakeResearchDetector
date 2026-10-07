@@ -27,3 +27,7 @@ export async function analyzeResearchPaper(paperId) {
 
   return response.data
 }
+export async function getPaperResults(paperId) {
+  const response = await apiClient.get(`/papers/${paperId}`)
+  return response.data
+}

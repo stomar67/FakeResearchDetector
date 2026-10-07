@@ -4,6 +4,7 @@ import UploadStatus from './components/Upload/UploadStatus'
 import {
   uploadResearchPaper,
   analyzeResearchPaper,
+  getPaperResults,
 } from './services/api'
 
 function App() {
@@ -33,12 +34,15 @@ function App() {
 
       const analysisResult = await analyzeResearchPaper(paperId)
 
-      setAnalysisResult(analysisResult)
-      setStatus('success')
-      setMessage(
-        analysisResult?.message ||
-          'Paper analysis request completed.',
-      )
+const paperResults = await getPaperResults(paperId)
+
+setAnalysisResult(paperResults)
+setStatus('success')
+setMessage(
+  analysisResult?.message ||
+    'Paper analysis completed successfully.',
+)
+      
     } catch (error) {
       console.error('Paper upload/analysis failed:', error)
 
