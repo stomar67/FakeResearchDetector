@@ -10,7 +10,12 @@ from ..dependencies import get_db
 from ..models import Citation, Claim, Document, Page, Paper, Reference, Section
 from ..schemas import (
     AnalysisResponse,
+    PaperResultsResponse,
     PaperUploadResponse,
+    ResultClaim,
+    ResultCitation,
+    ResultReference,
+    ResultSection,
 )
 from ..services.nlp_service import run_phase1_nlp
 
@@ -81,6 +86,109 @@ async def upload_paper(
     return PaperUploadResponse(
         paper=paper,
         document=document,
+    )
+
+
+@router.get(
+    "/{paper_id}",
+    response_model=PaperResultsResponse,
+)
+def get_paper_results(
+    paper_id: int,
+    db: Session = Depends(get_db),
+):
+    paper = db.get(Paper, paper_id)
+
+    if paper is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Paper not found.",
+        )
+
+    sections = (
+        db.query(Section)
+        .filter(Section.paper_id == paper_id)
+        .order_by(Section.section_order)
+        .all()
+    )
+
+    references = (
+        db.query(Reference)
+        .filter(Reference.paper_id == paper_id)
+        .order_by(Reference.reference_number)
+        .all()
+    )
+
+    claims = (
+        db.query(Claim)
+        .filter(Claim.paper_id == paper_id)
+        .order_by(Claim.id)
+        .all()
+    )
+
+    citations = (
+        db.query(Citation)
+        .filter(Citation.paper_id == paper_id)
+        .order_by(Citation.id)
+        .all()
+    )
+
+    citation_ids_by_claim = {}
+
+    for citation in citations:
+        if citation.claim_id is not None:
+            citation_ids_by_claim.setdefault(
+                citation.claim_id,
+                [],
+            ).append(citation.id)
+
+    return PaperResultsResponse(
+        paper=paper,
+        sections=[
+            ResultSection(
+                id=section.id,
+                name=section.section_name,
+                order=section.section_order,
+                page_start=section.page_start,
+                page_end=section.page_end,
+                content=section.content,
+            )
+            for section in sections
+        ],
+        references=[
+            ResultReference(
+                id=reference.id,
+                reference_number=reference.reference_number,
+                reference_identifier=reference.reference_identifier,
+                page_number=reference.page_number,
+                raw_text=reference.raw_text,
+            )
+            for reference in references
+        ],
+        claims=[
+            ResultClaim(
+                id=claim.id,
+                text=claim.claim_text,
+                claim_type=claim.claim_type,
+                page_number=claim.page_number,
+                section_id=claim.section_id,
+                citation_ids=citation_ids_by_claim.get(
+                    claim.id,
+                    [],
+                ),
+            )
+            for claim in claims
+        ],
+        citations=[
+            ResultCitation(
+                id=citation.id,
+                citation_text=citation.citation_text,
+                page_number=citation.page_number,
+                claim_id=citation.claim_id,
+                reference_id=citation.reference_id,
+            )
+            for citation in citations
+        ],
     )
 
 
