@@ -7,6 +7,12 @@ import {
   getPaperResults,
 } from './services/api'
 
+import PaperMetadata from './components/Results/Metadata/PaperMetadata'
+import SectionViewer from './components/Results/Sections/SectionViewer'
+import ClaimsList from './components/Results/Claims/ClaimsList'
+import CitationsList from './components/Results/Citations/CitationsList'
+import ReferencesList from './components/Results/References/ReferencesList'
+
 function App() {
   const [selectedFile, setSelectedFile] = useState(null)
   const [status, setStatus] = useState('idle')
@@ -32,7 +38,7 @@ function App() {
 
       setStatus('processing')
 
-      const analysisResult = await analyzeResearchPaper(paperId)
+const analysisResult = await analyzeResearchPaper(paperId)
 
 const paperResults = await getPaperResults(paperId)
 
@@ -82,24 +88,20 @@ setMessage(
       />
 
       {analysisResult && (
-        <section>
-          <h2>Analysis Status</h2>
+  <section>
+    <h2>Analysis Results</h2>
 
-          <p>
-            Paper ID:{' '}
-            <strong>{analysisResult.paper_id}</strong>
-          </p>
+   <PaperMetadata paper={analysisResult.paper} />
 
-          <p>
-            Status:{' '}
-            <strong>{analysisResult.status}</strong>
-          </p>
+<SectionViewer sections={analysisResult.sections} />
 
-          <p>
-            {analysisResult.message}
-          </p>
-        </section>
-      )}
+<ClaimsList claims={analysisResult.claims} />
+
+<CitationsList citations={analysisResult.citations} />
+
+<ReferencesList references={analysisResult.references} />
+  </section>
+)}
     </div>
   )
 }
