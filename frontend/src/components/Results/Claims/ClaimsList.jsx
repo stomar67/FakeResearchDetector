@@ -1,3 +1,4 @@
+
 function ClaimsList({ claims }) {
   if (!claims || claims.length === 0) {
     return (
@@ -17,7 +18,7 @@ function ClaimsList({ claims }) {
           <h3>Claim {claim.id}</h3>
 
           <p>
-            <strong>Claim:</strong> {claim.claim_text}
+            <strong>Claim:</strong> {claim.text}
           </p>
 
           {claim.claim_type && (
@@ -26,9 +27,26 @@ function ClaimsList({ claims }) {
             </p>
           )}
 
-          {claim.page_number && (
+          {claim.page_number !== null &&
+            claim.page_number !== undefined && (
+              <p>
+                <strong>Page:</strong> {claim.page_number}
+              </p>
+            )}
+
+          {claim.section_id !== null &&
+            claim.section_id !== undefined && (
+              <p>
+                <strong>Section ID:</strong> {claim.section_id}
+              </p>
+            )}
+
+          {Array.isArray(claim.citation_ids) && (
             <p>
-              <strong>Page:</strong> {claim.page_number}
+              <strong>Citation IDs:</strong>{' '}
+              {claim.citation_ids.length > 0
+                ? claim.citation_ids.join(', ')
+                : 'None'}
             </p>
           )}
         </article>
@@ -38,3 +56,4 @@ function ClaimsList({ claims }) {
 }
 
 export default ClaimsList
+
