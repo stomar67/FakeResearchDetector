@@ -96,4 +96,96 @@ def extract_in_text_citations(pages: List[Page]) -> List[InTextCitation]:
                 )
             )
 
+
     return results
+
+
+def match_citations_to_references(citations, references):
+    """Match author-year citations to bibliography reference IDs conservatively."""
+    import re
+
+    year_pattern = re.compile(r"\b((?:19|20)\d{2}[a-z]?)\b", re.IGNORECASE)
+
+    def get_surname(author_text):
+        author_text = author_text.strip(" ,.;()")
+        author_text = re.sub(r"\bet\s+al\.?$", "", author_text, flags=re.I).strip()
+        author_text = re.sub(r"\s+(?:and|&)\s+.*$", "", author_text, flags=re.I).strip()
+
+        # Citation names are normally "Surname, ..." or "Surname ..."
+        if "," in author_text:
+            return author_text.split(",", 1)[0].strip().lower()
+
+        words = re.findall(r"[A-Za-z][A-Za-z'-]*", author_text)
+        return words[0].lower() if words else ""
+
+    def split_citation_group(text):
+        text = text.strip().strip("()")
+        parts = re.split(r"\s*;\s*", text)
+        results = []
+
+        for part in parts:
+            year_match = year_pattern.search(part)
+            if not year_match:
+                continue
+
+            author_text = part[:year_match.start()].strip(" ,.")
+            surname = get_surname(author_text)
+            year = year_match.group(1).lower()
+
+            if surname:
+                results.append((surname, year))
+
+        return results
+
+    def reference_author_year(reference):
+        # Prefer the structured reference identifier, e.g. "Aaron T Beck 2008".
+        identifier = reference.reference_id
+        year_match = year_pattern.search(identifier)
+
+        if year_match:
+            author_text = identifier[:year_match.start()].strip(" ,.")
+            surname = get_surname(author_text)
+            return surname, year_match.group(1).lower()
+
+        # Fall back to the reference text when the identifier lacks a year.
+        text = reference.text
+        year_match = year_pattern.search(text)
+
+        if year_match:
+            author_text = text[:year_match.start()].strip(" ,.")
+            surname = get_surname(author_text)
+            return surname, year_match.group(1).lower()
+
+        return "", ""
+
+    matched_citations = []
+
+    for citation in citations:
+        result = citation.model_copy(deep=True)
+
+        if citation.citation_type != "author_year":
+            matched_citations.append(result)
+            continue
+
+        citation_parts = split_citation_group(citation.citation_text)
+        matched_ids = []
+
+        for surname, year in citation_parts:
+            candidates = []
+
+            for reference in references:
+                ref_surname, ref_year = reference_author_year(reference)
+
+                if ref_surname == surname and ref_year == year:
+                    candidates.append(reference.reference_id)
+
+            # Only add a match when exactly one reference fits.
+            if len(candidates) == 1:
+                reference_id = candidates[0]
+                if reference_id not in matched_ids:
+                    matched_ids.append(reference_id)
+
+        result.reference_ids = matched_ids
+        matched_citations.append(result)
+
+    return matched_citations
