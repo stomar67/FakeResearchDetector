@@ -52,3 +52,79 @@ if __name__ == "__main__":
     test_references()
     test_citations()
     print("Phase 1 extraction tests passed.")
+
+def test_author_year_reference_matching():
+    from pdf_processor.citations import match_citations_to_references
+    from pdf_processor.schemas import InTextCitation, Reference
+
+    references = [
+        Reference(
+            reference_id="Aaron T Beck 2008",
+            text="Aaron T Beck. 2008. The book title.",
+            page_number=2,
+        ),
+        Reference(
+            reference_id="David A Clark and Aaron T Beck 2010",
+            text="David A Clark and Aaron T Beck. 2010. Another title.",
+            page_number=2,
+        ),
+    ]
+
+    citations = [
+        InTextCitation(
+            citation_text="(Beck, 2008)",
+            citation_type="author_year",
+            page_number=1,
+        ),
+        InTextCitation(
+            citation_text="Clark and Beck (2010)",
+            citation_type="author_year",
+            page_number=1,
+        ),
+        InTextCitation(
+            citation_text="[3]",
+            citation_type="numeric",
+            reference_ids=["3"],
+            page_number=1,
+        ),
+    ]
+
+    matched = match_citations_to_references(citations, references)
+
+    assert matched[0].reference_ids == ["Aaron T Beck 2008"]
+    assert matched[1].reference_ids == [
+        "David A Clark and Aaron T Beck 2010"
+    ]
+    assert matched[2].reference_ids == ["3"]
+
+def test_multiple_author_year_citations_in_one_group():
+    from pdf_processor.citations import match_citations_to_references
+    from pdf_processor.schemas import InTextCitation, Reference
+
+    references = [
+        Reference(
+            reference_id="Wang et al. 2023b",
+            text="Wang et al. 2023b. First paper.",
+            page_number=2,
+        ),
+        Reference(
+            reference_id="Smith 2021",
+            text="Smith, J. 2021. Second paper.",
+            page_number=2,
+        ),
+    ]
+
+    citations = [
+        InTextCitation(
+            citation_text="(Wang et al., 2023b; Smith, 2021)",
+            citation_type="author_year",
+            page_number=1,
+        )
+    ]
+
+    matched = match_citations_to_references(citations, references)
+
+    assert set(matched[0].reference_ids) == {
+        "Wang et al. 2023b",
+        "Smith 2021",
+    }
