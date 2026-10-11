@@ -41,8 +41,32 @@ def _expand_numeric(value: str) -> List[str]:
     return sorted(ids, key=int)
 
 
+
 def _context(text: str, start: int, end: int, radius: int = 100) -> str:
     return text[max(0, start - radius): min(len(text), end + radius)].strip()
+
+
+def _is_likely_non_citation_group(group: str) -> bool:
+    """Reject known funding and venue patterns mistaken for author-year citations."""
+    value = re.sub(r"\s+", " ", group.strip())
+
+    # Example: (Grant Nos. 2042022kf1218, 2042022kf1037)
+    if re.match(
+        r"^(?:grant|funding)\s+(?:nos?\.?|numbers?)(?:\s|$)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return True
+
+    # Example: (LREC-COLING 2024)
+    # Reject acronym-style venue names followed directly by a year.
+    if re.fullmatch(
+        r"[A-Z][A-Z0-9]*(?:-[A-Z][A-Z0-9]*)+\s+(?:19|20)\d{2}[a-z]?",
+        value,
+    ):
+        return True
+
+    return False
 
 
 def extract_in_text_citations(pages: List[Page]) -> List[InTextCitation]:
@@ -65,6 +89,9 @@ def extract_in_text_citations(pages: List[Page]) -> List[InTextCitation]:
         # Parenthetical author-year citations. IDs remain empty in Phase 1;
         # matching them to bibliography entries is a later verification task.
         for match in AUTHOR_YEAR_GROUP_RE.finditer(text):
+            if _is_likely_non_citation_group(match.group(1)):
+                continue
+
             results.append(
                 InTextCitation(
                     citation_text=match.group(0),
@@ -100,90 +127,105 @@ def extract_in_text_citations(pages: List[Page]) -> List[InTextCitation]:
     return results
 
 
+
+
+
 def match_citations_to_references(citations, references):
-    """Match author-year citations to bibliography reference IDs conservatively."""
+    """Conservatively match author-year citations to bibliography entries."""
     import re
+    import unicodedata
 
-    year_pattern = re.compile(r"\b((?:19|20)\d{2}[a-z]?)\b", re.IGNORECASE)
+    year_pattern = re.compile(r"\b((?:19|20)\d{2}[a-z]?)\b", re.I)
+    word_pattern = re.compile(r"[^\W\d_][\w'-]*", re.UNICODE)
 
-    def get_surname(author_text):
-        author_text = author_text.strip(" ,.;()")
-        author_text = re.sub(r"\bet\s+al\.?$", "", author_text, flags=re.I).strip()
-        author_text = re.sub(r"\s+(?:and|&)\s+.*$", "", author_text, flags=re.I).strip()
+    def normalize(value):
+        value = unicodedata.normalize("NFKD", value or "")
+        value = "".join(
+            ch for ch in value if not unicodedata.combining(ch)
+        )
+        value = value.replace("\u00ad", "")
+        value = value.replace("’", "'").replace("–", "-").replace("—", "-")
+        value = re.sub(r"(?<=\w)-\s+(?=\w)", "-", value)
+        return re.sub(r"\s+", " ", value).strip()
 
-        # Citation names are normally "Surname, ..." or "Surname ..."
+    def surname_key(author_text):
+        author_text = normalize(author_text).strip(" ,.;()")
+        author_text = re.sub(
+            r"\bet\s+al\.?$", "", author_text, flags=re.I
+        ).strip()
+
+        # "Beck, A. T." -> Beck
+        # "Aaron T Beck" -> Beck
+        # "Clark and Beck" -> Beck
         if "," in author_text:
-            return author_text.split(",", 1)[0].strip().lower()
+            first = author_text.split(",", 1)[0].strip()
+            words = word_pattern.findall(first)
+        else:
+            words = word_pattern.findall(author_text)
+            words = [
+                word for word in words
+                if word.casefold() not in {"and", "et", "al"}
+            ]
 
-        words = re.findall(r"[A-Za-z][A-Za-z'-]*", author_text)
-        return words[0].lower() if words else ""
+        return words[-1].casefold() if words else ""
 
-    def split_citation_group(text):
-        text = text.strip().strip("()")
-        parts = re.split(r"\s*;\s*", text)
-        results = []
+    def citation_parts(citation_text):
+        text = normalize(citation_text).strip().strip("()")
+        result = []
 
-        for part in parts:
+        for part in re.split(r"\s*;\s*", text):
             year_match = year_pattern.search(part)
             if not year_match:
                 continue
 
-            author_text = part[:year_match.start()].strip(" ,.")
-            surname = get_surname(author_text)
-            year = year_match.group(1).lower()
+            surname = surname_key(part[:year_match.start()])
+            year = year_match.group(1).casefold()
 
             if surname:
-                results.append((surname, year))
+                result.append((surname, year))
 
-        return results
+        return result
 
-    def reference_author_year(reference):
-        # Prefer the structured reference identifier, e.g. "Aaron T Beck 2008".
-        identifier = reference.reference_id
-        year_match = year_pattern.search(identifier)
+    def reference_parts(reference):
+        identifier = normalize(reference.reference_id)
+        text = (
+            identifier
+            if year_pattern.search(identifier)
+            else normalize(reference.text)
+        )
 
-        if year_match:
-            author_text = identifier[:year_match.start()].strip(" ,.")
-            surname = get_surname(author_text)
-            return surname, year_match.group(1).lower()
-
-        # Fall back to the reference text when the identifier lacks a year.
-        text = reference.text
         year_match = year_pattern.search(text)
+        if not year_match:
+            return "", ""
 
-        if year_match:
-            author_text = text[:year_match.start()].strip(" ,.")
-            surname = get_surname(author_text)
-            return surname, year_match.group(1).lower()
+        surname = surname_key(text[:year_match.start()])
+        return surname, year_match.group(1).casefold()
 
-        return "", ""
+    reference_index = {}
+    for reference in references:
+        surname, year = reference_parts(reference)
+        if surname and year:
+            reference_index.setdefault((surname, year), []).append(
+                reference.reference_id
+            )
 
     matched_citations = []
 
     for citation in citations:
         result = citation.model_copy(deep=True)
 
+        # Preserve numeric citation IDs exactly as extracted.
         if citation.citation_type != "author_year":
             matched_citations.append(result)
             continue
 
-        citation_parts = split_citation_group(citation.citation_text)
         matched_ids = []
+        for surname, year in citation_parts(citation.citation_text):
+            candidates = reference_index.get((surname, year), [])
 
-        for surname, year in citation_parts:
-            candidates = []
-
-            for reference in references:
-                ref_surname, ref_year = reference_author_year(reference)
-
-                if ref_surname == surname and ref_year == year:
-                    candidates.append(reference.reference_id)
-
-            # Only add a match when exactly one reference fits.
-            if len(candidates) == 1:
-                reference_id = candidates[0]
-                if reference_id not in matched_ids:
-                    matched_ids.append(reference_id)
+            # Do not guess when multiple references share a surname and year.
+            if len(candidates) == 1 and candidates[0] not in matched_ids:
+                matched_ids.append(candidates[0])
 
         result.reference_ids = matched_ids
         matched_citations.append(result)

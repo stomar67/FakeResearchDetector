@@ -128,3 +128,84 @@ def test_multiple_author_year_citations_in_one_group():
         "Wang et al. 2023b",
         "Smith 2021",
     }
+
+def test_wrapped_author_list_starts_new_reference():
+    pages = [
+        Page(
+            page_number=1,
+            text="""References
+Liang Xu, Anqi Li, Lei Zhu, Hang Xue, Changtai Zhu,
+Kangkang Zhao, Haonan He, Xuanwei Zhang, Qiyue
+Kang, and Zhenzhong Lan. 2023. Superclue: A comprehensive benchmark.
+An Yang, Baosong Yang, Binyuan Hui, Bo Zheng,
+Bowen Yu, Chang Zhou, Chengpeng Li, Chengyuan Li,
+Dayiheng Liu, Fei Huang, et al. 2024. Qwen2 technical report.
+ZouFan. 2023. Sina weibo comment.
+""",
+        )
+    ]
+
+    refs = extract_references(pages)
+
+    assert len(refs) == 3
+    assert refs[0].reference_id == "Liang Xu, Anqi Li, Lei Zhu, Hang Xue, Changtai Zhu, Kangkang Zhao, Haonan He, Xuanwei Zhang, Qiyue Kang, and Zhenzhong Lan 2023"
+    assert refs[1].reference_id.startswith("An Yang, Baosong Yang")
+    assert "Qwen2 technical report" in refs[1].text
+    assert refs[2].reference_id == "ZouFan 2023"
+
+
+def test_non_citation_parentheticals_are_filtered():
+    page = Page(
+        page_number=1,
+        text=(
+            "(Grant Nos. 2042022kf1218, 2042022kf1037). "
+            "(LREC-COLING 2024). "
+            "(Wang et al., 2023b; Smith, 2021). "
+            "Beck (2008)."
+        ),
+    )
+
+    citations = extract_in_text_citations([page])
+    texts = [citation.citation_text for citation in citations]
+
+    assert not any("Grant Nos." in text for text in texts)
+    assert "(LREC-COLING 2024)" not in texts
+
+    # Genuine parenthetical and narrative citations must remain.
+    assert "(Wang et al., 2023b; Smith, 2021)" in texts
+    assert "Beck (2008)" in texts
+
+
+def test_split_merged_parenthesized_author_year_references():
+    from pdf_processor.references import _split_merged_author_year_text
+
+    text = (
+        "Ullah, H., Saba, T., Islam, N. (2019). First paper title. "
+        "Viera, A. J., & Garrett, J. M. (2005). "
+        "Understanding interobserver agreement."
+    )
+
+    pieces = _split_merged_author_year_text(text)
+    extracted = [piece for piece, _ in pieces]
+
+    assert len(extracted) == 2
+    assert extracted[0].startswith("Ullah, H.")
+    assert extracted[1].startswith("Viera, A. J.")
+    assert "First paper title" in extracted[0]
+    assert "Understanding interobserver agreement" in extracted[1]
+
+
+def test_split_merged_references_removes_article_footer():
+    from pdf_processor.references import _split_merged_author_year_text
+
+    text = (
+        "Smith, J., & Jones, A. (2020). First paper. "
+        "Brown, K., & Green, L. (2021). Second paper. "
+        "How to cite this article: Example citation."
+    )
+
+    pieces = _split_merged_author_year_text(text)
+    extracted = [piece for piece, _ in pieces]
+
+    assert len(extracted) == 2
+    assert all("How to cite this article" not in item for item in extracted)

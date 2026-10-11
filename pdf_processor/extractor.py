@@ -4,7 +4,10 @@ from typing import Optional, Tuple
 
 import pymupdf
 
-from .citations import extract_in_text_citations
+from .citations import (
+    extract_in_text_citations,
+    match_citations_to_references,
+)
 from .metadata import extract_metadata
 from .ocr import ocr_pdf
 from .quality import extraction_quality, needs_ocr
@@ -81,6 +84,10 @@ def extract_document(
             # OCR is intentionally an integration point in this Phase-1 package.
             pass
 
+    references = extract_references(pages)
+    citations = extract_in_text_citations(pages)
+    citations = match_citations_to_references(citations, references)
+
     return StructuredDocument(
         paper_id=paper_id,
         variant_id=variant_id,
@@ -88,11 +95,12 @@ def extract_document(
         metadata=metadata,
         pages=pages,
         sections=detect_sections(pages),
-        references=extract_references(pages),
-        in_text_citations=extract_in_text_citations(pages),
+        references=references,
+        in_text_citations=citations,
         extraction_info=ExtractionInfo(
             method=method,
             ocr_used=ocr_used,
             quality_score=quality,
         ),
     )
+
